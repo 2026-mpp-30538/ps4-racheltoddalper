@@ -1,7 +1,7 @@
 ---
-title: "title"
-author: "author"
-date: "date"
+title: "Problem Set 4"
+author: "Rachel Alper"
+date: "February 7"
 format: 
   pdf:
     include-in-header: 
@@ -23,7 +23,7 @@ output:
 
 **Due 02/07 at 5:00PM Central.**
 
-"This submission is my work alone and complies with the 30538 integrity policy." Add your initials to indicate your agreement: \*\*\_\_\*\*
+"This submission is my work alone and complies with the 30538 integrity policy." Add your initials to indicate your agreement: RA
 
 ### Github Classroom Assignment Setup and Submission Instructions
 
