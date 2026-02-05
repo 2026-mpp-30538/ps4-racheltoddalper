@@ -52,6 +52,8 @@ output:
 import pandas as pd
 import altair as alt
 import time
+import requests
+from bs4 import BeautifulSoup
 
 import warnings 
 warnings.filterwarnings('ignore')
@@ -63,9 +65,37 @@ alt.renderers.enable("png")
 
 
 ```{python}
-
+with open(r'hhs_website.html', 'r') as page:
+    hhs_website = page.read()
+    soup = BeautifulSoup(hhs_website, 'lxml')
 ```
 
+```{python}
+records = []
+
+cards = soup.find_all("li", class_="usa-card")
+
+for card in cards:
+
+    title = card.find("h2").get_text(strip=True)
+    
+    date = card.find("span").get_text(strip=True)
+    
+    category_tag = card.find("li", class_="usa-tag")
+    category = category_tag.get_text(strip=True) if category_tag else None
+    
+    records.append({
+        "title": title,
+        "date": date,
+        "category": category
+    })
+
+
+df = pd.DataFrame(records)
+df["date"] = pd.to_datetime(df["date"])
+
+df.head()
+```
 ## Step 2: Making the scraper dynamic
 
 ### 1. Turning the scraper into a function 
