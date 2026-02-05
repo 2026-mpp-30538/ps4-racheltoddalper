@@ -57,7 +57,7 @@ from bs4 import BeautifulSoup
 
 import warnings 
 warnings.filterwarnings('ignore')
-alt.renderers.enable("png")
+alt.renderers.enable("png", ppi=200)
 ```
 
 
@@ -102,17 +102,122 @@ df.head()
 
 * a. Pseudo-Code
 
+Step 1: Validate the input and ensure that the start year is not prior to 2013 and that the indicator to run the function is turned on. 
+
+Step 2: Initialize variables including base url, page number, records, and compute a start date.
+
+Step 3: Use a while loop (this is better than a for loop because we don't know how many pages we need; we just don't want to go earlier than the start date). The while loop will take the following form:
+
+while True:
+    scrape page
+    extract titles, dates, categories
+    
+    if oldest date on page < start_date:
+        break
+    
+    page += 1
+    sleep(1)
+
+Step 4: Save to date time format and convert to csv
 
 * b. Create Dynamic Scraper
 
 ```{python}
+def scrape_enforcement_actions(start_month, start_year, run_scraper=True):
+    
+    if not run_scraper:
+        print("Scraper is turned off.")
+        return None
+    
+    if start_year < 2013:
+        print("Must have a start year >= 2013")
+        return None
+    
+    
+    start_date = pd.Timestamp(year=start_year, month=start_month, day=1)
+    
+    base_url = "https://oig.hhs.gov/fraud/enforcement/"
+    page = 1
+    records = []
+    
+    while True:
+        
+        url = base_url if page == 1 else f"{base_url}?page={page}"
+        print(f"Scraping page {page}...")
+        
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, "lxml")
+        
+        cards = soup.find_all("li", class_="usa-card")
+        
+        if not cards:
+            break
+        
+        page_dates = []
+        
+        for card in cards:
+            
+            title = card.find("h2").get_text(strip=True)
+            date_text = card.find("span").get_text(strip=True)
+            date = pd.to_datetime(date_text)
+            
+            category_tags = card.find_all("li", class_="usa-tag")
+            categories = ", ".join(tag.get_text(strip=True) for tag in category_tags)
+            
+            page_dates.append(date)
+            
+            records.append({
+                "title": title,
+                "date": date,
+                "category": categories
+            })
+        
+        if min(page_dates) < start_date:
+            break
+        
+        page += 1
+        time.sleep(1) 
+    
+    
+    df = pd.DataFrame(records)
+    
+    df = df[df["date"] >= start_date].sort_values("date", ascending=False)
+    
+    filename = f"enforcement_actions_{start_year}_{start_month}.csv"
+    df.to_csv(filename, index=False)
+    
+    print(f"\nSaved to {filename}")
+    print(f"Total enforcement actions: {len(df)}")
+    
+    return df
+```
 
+Now we can run the function for January 2024 and then change the indicator to false:
+```{python}
+df_2024 = scrape_enforcement_actions(1, 2024, run_scraper=False)
+```
+
+```{python}
+file_path = 'enforcement_actions_2024_1.csv'
+df_2024 = pd.read_csv(file_path, index_col = 0)
+
+print("The number of enforcement actions found is {}".format(len(df_2024)))
+print("The earliest date in the datat is {}".format(df_2024.sort_values("date").iloc[0]))
 ```
 
 * c. Test Your Code
 
 ```{python}
+df_2022 = scrape_enforcement_actions(1, 2022, run_scraper=False)
+```
 
+```{python}
+file_path = 'enforcement_actions_2022_1.csv'
+df = pd.read_csv(file_path, index_col = 0)
+df = df.reset_index()
+
+print("The number of enforcement actions found is {}".format(len(df)))
+print("The earliest date in the datat is {}".format(df.sort_values("date").iloc[0]))
 ```
 
 ## Step 3: Plot data based on scraped data
@@ -120,7 +225,27 @@ df.head()
 ### 1. Plot the number of enforcement actions over time
 
 ```{python}
+df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
+monthly_counts = (
+    df
+    .set_index("date")
+    .resample("M")    
+    .size()
+    .reset_index(name="num_actions")
+)
+
+chart = alt.Chart(monthly_counts).mark_line().encode(
+    x=alt.X("date:T", title="Month"),
+    y=alt.Y("num_actions:Q", title="Number of Enforcement Actions"),
+    tooltip=["date:T", "num_actions:Q"]
+).properties(
+    title="Number of HHS Enforcement Actions per Month (Since Jan 2022)",
+    width=500,
+    height=400
+)
+
+chart
 ```
 
 ### 2. Plot the number of enforcement actions categorized:
@@ -128,11 +253,80 @@ df.head()
 * based on "Criminal and Civil Actions" vs. "State Enforcement Agencies"
 
 ```{python}
+def simplify_category(cat):
+    if "Criminal and Civil Actions" in cat:
+        return "Criminal and Civil Actions"
+    elif "State Enforcement Agencies" in cat:
+        return "State Enforcement Agencies"
+    else:
+        return "Other"
 
+df["main_category"] = df["category"].apply(simplify_category)
+
+monthly_cat = (
+    df
+    .set_index("date")
+    .groupby("main_category")
+    .resample("M")
+    .size()
+    .reset_index(name="num_actions")
+)
+
+alt.Chart(monthly_cat).mark_line(point=True).encode(
+    x=alt.X("date:T", title="Month"),
+    y=alt.Y("num_actions:Q", title="Number of Enforcement Actions"),
+    color=alt.Color("main_category:N", title="Category"),
+    tooltip=["date:T", "main_category:N", "num_actions:Q"]
+).properties(
+    title="Enforcement Actions per Month by Category (Since Jan 2022)",
+    width=500,
+    height=400
+)
 ```
 
 * based on five topics
 
 ```{python}
+import re
 
+def classify_topic(title):
+    title = title.lower()
+    
+    if re.search(r"health|medicare|medicaid|kickback|patient|clinic|chiropractor|hospital", title):
+        return "Health Care Fraud"
+    
+    elif re.search(r"bank|financial|loan|money laundering|wire fraud|investment", title):
+        return "Financial Fraud"
+    
+    elif re.search(r"drug|opioid|controlled substance|pharmacy|fentanyl", title):
+        return "Drug Enforcement"
+    
+    elif re.search(r"brib|corrupt|kickback scheme", title):
+        return "Bribery/Corruption"
+    
+    else:
+        return "Other"
+
+criminal_df = df[df["main_category"] == "Criminal and Civil Actions"].copy()
+criminal_df["topic"] = criminal_df["title"].apply(classify_topic)
+
+monthly_topics = (
+    criminal_df
+    .set_index("date")
+    .groupby("topic")
+    .resample("M")
+    .size()
+    .reset_index(name="num_actions")
+)
+
+alt.Chart(monthly_topics).mark_line(point=True).encode(
+    x=alt.X("date:T", title="Month"),
+    y=alt.Y("num_actions:Q", title="Number of Enforcement Actions"),
+    color=alt.Color("topic:N", title="Topic"),
+    tooltip=["date:T", "topic:N", "num_actions:Q"]
+).properties(
+    title="Criminal & Civil Enforcement Actions by Topic (Since Jan 2022)",
+    width=500,
+    height=400
+)
 ```
